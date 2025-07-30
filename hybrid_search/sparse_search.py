@@ -2,15 +2,50 @@ import bm25s
 import numpy as np
 
 class SparseSearch:
-    def __init__(self):
-        pass
+    def __init__(
+            self,
+            corpora_name,
+            corpora_file_path,
+            ids,
+            int_id = True,):
+        """
+        Parameteres
+        -----------
+            corpora_file_path : str
+                The directory where the corpora is to be saved or added to a pre-existing corpus
+
+            corpora_name : str
+                The unique identifyer prepended to the ids which represent the true corpora name in the file system
+        """
+        if not isinstance(int_id, bool):
+            raise ValueError("Parameter: int_id has to be a bool")
+
+        if isinstance(ids, list) and int_id:
+            raise ValueError("Parameter: ids has to be a list")
+        
+        if not (isinstance(ids, np.ndarray) and int_id):
+            raise ValueError("Parameter: ids has to be numpy array")
+        
+        if not isinstance(corpora_name, str):
+            raise ValueError("Parameter: corpora_name has to be a string")
+        
+        if not isinstance(corpora_file_path, str):
+            raise ValueError("Parameter: corpora_file_path has to be a string")
+                
+        if int_id:
+            self.id_paths = [f"{self.file_path}\{self.corpora_tag}_{str(id)}" for id in ids]
+        else:
+            self.id_paths = ids
+        
+        self.corpora_tag = corpora_name
+        self.file_path = corpora_file_path
+        self.load_corpus( mmap = True, load_corpus = True)
     
     def save_corpus(
-            self, 
-            corpora, 
+            self,
             ids, 
-            directory_path,
-            corpora_tag,
+            corpora,
+            int_id = True, 
             stop_words = "en"):
         """
         Paramteres
@@ -21,46 +56,41 @@ class SparseSearch:
             ids : np.ndarray, list
                 The ids of the corresponding to the index of the corpora
 
-            directory_path : str
-                The directory where the corpora is to be saved or added to a pre-existing corpus
-
-            corpora_tag : str
-                The unique identifyer prepended to the ids which represent the true corpora name in the file system
+            int_id : bool
 
             stop_words : str, list
-                ISO 639 identifier or a list of actual stopwords
+                An Parameter fro bm25s.BM35.tokenization . ISO 639 identifier or a list of actual stopwords. Union[str, List[str]], optional
+                The list of stopwords to remove from the text. If "english" or "en" is provided,
+                the function will use the default English stopwords. If None or False is provided,
+                no stopwords will be removed. If a list of strings is provided, the tokenizer will
+                use the list of strings as stopwords.
         """
+        if not isinstance(int_id, bool):
+            raise ValueError("Parameter: int_id has to be a bool")
 
-        if not isinstance(ids, (np.ndarray,list)):
-            raise ValueError("Parameter: ids has to be a list or a numpy array")
-
-        if not isinstance(corpora_tag, str):
-            raise ValueError("Parameter: corpora_tag has to be a string")
-
-        if not isinstance(directory_path, list):
-            raise ValueError("Parameter: directory_path has to be a list")
+        if isinstance(ids, list) and int_id:
+            raise ValueError("Parameter: ids has to be a list")
         
+        if not (isinstance(ids, np.ndarray) and int_id):
+            raise ValueError("Parameter: ids has to be numpy array")
         if not isinstance(corpora, list):
             raise ValueError("Parameter: corpora has to be a list")    
             
         if not isinstance(stop_words, (str, list)):
             raise ValueError(f"Parameter: stop_words has to be either ISO 639 code for the language or a list of stopwords")
-
-        if len(corpora) != len(ids):
-            raise ValueError(f"Length of corpora({len(corpora)}) & ids({len(ids)}) do not match.")
         
+        if int_id:
+            id_paths = [f"{self.file_path}\{self.corpora_tag}_{str(id)}" for id in ids]
+        else:
+            id_paths = ids
+
         saver = bm25s.BM25()
-        for _, (id, corpus) in enumerate(zip(ids, corpora)):
-            corpus_tokens = bm25s.tokenization(corpus, stopwords = stop_words)
-            id_path = directory_path + corpora_tag + str(id)
-            saver.index(corpus_tokens)
-            saver.save(id_path)
+        for _, (id, corpus) in enumerate(zip(id_paths, corpora)):
+            saver.index(bm25s.tokenize(corpus, stopwords = stop_words)) # Loading Corpus Tokens directly into the index
+            saver.save(save_dir = id)
 
     def load_corpus(
-            self, 
-            ids, 
-            directory_path,
-            corpora_tag,
+            self,
             mmap = True,
             load_corpus = True):
         """
@@ -69,11 +99,7 @@ class SparseSearch:
             ids : np.ndarray, list
                 The ids of the corresponding to the index of the corpora
 
-            directory_path : str
-                The directory where the corpora is to be saved or added to a pre-existing corpus
-
-            corpora_tag : str
-                The unique identifyer prepended to the ids which represent the true corpora name in the file system
+            int_id : bool
 
             mmap : bool
                 An Parameter fro bm25s.BM35.load. Whether to use Memory-map for the np.load function. If false, the arrays will be loaded into memory.
@@ -83,18 +109,11 @@ class SparseSearch:
             load_corpus : bool
                 An Parameter fro bm25s.BM35.load. If True, the corpus will be loaded from the `corpus_name` file.
         """
-        if not isinstance(ids, (np.ndarray,list)):
-            raise ValueError("Parameter: ids has to be a list or a numpy array")
-    
-        if not isinstance(directory_path, str):
-            raise ValueError("Parameter: corpora_tag has to be a string")
-        
-        ids_paths = [directory_path + corpora_tag + str(id) for id in ids]
-        self.retriever = []
+        self.retriever_obj = []
         # Needs multi-threading
-        for id in ids_paths:
+        for id in self.ids_paths:
             try:
-                self.retriever.append(bm25s.BM25.load(corpus_name = id, mmap = mmap, load_corpus = load_corpus))
+                self.retriever_obj.append(bm25s.BM25.load(corpus_name = id, mmap = mmap, load_corpus = load_corpus))
             except Exception as e:
                 print(f"{e}. {id} not found")
                 continue
@@ -112,14 +131,10 @@ class SparseSearch:
             query_keywords : list, str
                 The keywords that the seach will be perfomed upon
             
-            ids : np.ndarray, list
-                The ids of the corresponding to the index of the corpora on which the search will be performed upon
-            
             retriever_threshold : float
                 The avg similarity threshold to either keep or discard the seach results
             
             top_results_limit : int
-
 
             top_k : int
 
@@ -147,7 +162,7 @@ class SparseSearch:
         else:
             query_token = bm25s.tokenize(query_keywords)
 
-        for _, (id, obj) in enumerate(zip(ids, self.retriever)):
+        for _, (id, obj) in enumerate(zip(ids, self.retriever_obj)):
             _, score = obj.retrieve(query_token, k=top_k)
             avg_score = np.mean(score)
             result_id.append(id)
@@ -162,7 +177,7 @@ class SparseSearch:
             result_score = result_score[mask]
 
         if top_results_limit > 0 and top_results_limit < len(result_id):
-            max_indexes = np.Parameterpartition(result_score, -top_results_limit)[-top_results_limit : ]
+            max_indexes = np.argpartition(result_score, -top_results_limit)[-top_results_limit : ]
             result_id = result_id[max_indexes]
             result_score = result_score[max_indexes]
 
